@@ -12,7 +12,7 @@ from pathlib import Path
 import openpyxl
 import sys
 
-# Carpeta donde se encuentran los PDF
+# Carpeta donde se encuentran los PDF...
 carpeta_pdf = 'C:/CotizacionDescarga/'
 # Carpeta donde se moverán los PDF procesados
 carpeta_procesados = 'C:/CotizacionProcesada/'
