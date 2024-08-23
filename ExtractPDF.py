@@ -11,9 +11,11 @@ from docxtpl import DocxTemplate
 from pathlib import Path
 import openpyxl
 import sys
+import mimetypes
 
 # Carpeta donde se encuentran los PDF...
-carpeta_pdf = 'C:/CotizacionDescarga/'
+# carpeta_pdf = 'C:/CotizacionDescarga/'
+carpeta_pdf = os.path.join(os.environ['USERPROFILE'], 'Downloads')
 # Carpeta donde se moverán los PDF procesados
 carpeta_procesados = 'C:/CotizacionProcesada/'
 # Plantilla de Axeso
@@ -30,6 +32,36 @@ class CondicionesAxeso:
         self.numero_cuotas = self.sheet.cell(row=2, column=2).value
         self.meses_a_sumar = self.sheet.cell(row=2, column=3).value
         self.nrocotiza = self.sheet.cell(row=2, column=4).value + 1
+
+    def cargo_financiamiento(self,monto):
+        # Define el límite superior
+        limite_superior = 9999999
+
+        # Define las celdas que contienen los rangos y factores
+        rangos = []
+        factores = []
+
+        # Lee los valores de las celdas
+        for row in range(2, 18):  # desde la fila 2 hasta la 17
+            cell = self.sheet.cell(row=row, column=9)  # columna I es la número 9
+            rangos.append(cell.value)
+
+        for row in range(2, 18):  # desde la fila 2 hasta la 17
+            cell = self.sheet.cell(row=row, column=11)  # columna K es la número 11
+            factores.append(cell.value)
+
+        # Implementa la lógica para comparar el monto y obtener el factor correspondiente
+        for i, rango in enumerate(rangos):
+            if monto <= rango:
+                factor = factores[i]
+                break
+            elif monto > limite_superior:
+                factor = factores[-1]  # toma el factor del límite superior
+                break
+        else:
+            factor = None  # Si no se encuentra un rango que coincida, asigna None
+        return factor    
+        
 
     def incrementa_nrocotiza(self):
         self.sheet.cell(row=2, column=4).value += 1
@@ -174,12 +206,15 @@ def extract_fechapago1_info(pdf_file_path: Path) -> str:
     return None
     
 def extract_pdf_info(pdf_file_path: Path) -> dict:
+    prima_info = extract_prima_info(pdf_file_path)
     # Crear una instancia de la clase
     condiciones_axeso = CondicionesAxeso('C:/ExtractPDF/CondicionesAxeso.xlsx')
     # Cargar datos
     condiciones_axeso.carga_datos()
     # Incrementar nrocotiza
     condiciones_axeso.incrementa_nrocotiza()
+    # Buscar Cargo del Financiamiento
+    cargo = prima_info * condiciones_axeso.cargo_financiamiento(prima_info)
     # Guardar datos
     condiciones_axeso.guarda_datos()
     #Extrae información de un archivo PDF
@@ -194,6 +229,9 @@ def extract_pdf_info(pdf_file_path: Path) -> dict:
     fechapago2 = fechapago2_date.strftime('%m/%d/%Y')
     deposito = prima_info * condiciones_axeso.monto_inicial
     cantfin = prima_info - deposito
+    totalpag = cantfin + cargo
+    mtocuota = totalpag / condiciones_axeso.numero_cuotas
+    mtoventa = prima_info + cargo
     #print('client_info: ',client_info)
     #print('direccion_info: ', direccion_info)
     #print('poliza_info: ',poliza_info)
@@ -210,7 +248,11 @@ def extract_pdf_info(pdf_file_path: Path) -> dict:
                 'deposito': "{0:,.2f}".format(deposito),
                 'cuotas': condiciones_axeso.numero_cuotas,
                 'cantfin': "{0:,.2f}".format(cantfin),
-                'nrocotiza': condiciones_axeso.nrocotiza
+                'nrocotiza': condiciones_axeso.nrocotiza,
+                'cargo': "{0:,.2f}".format(cargo),
+                'totalpag': "{0:,.2f}".format(totalpag),
+                'mtocuota': "{0:,.2f}".format(mtocuota),
+                'mtoventa': "{0:,.2f}".format(mtoventa)
                  }
  
 def generate_docx(pdf_info: dict) -> None:
@@ -227,7 +269,11 @@ def generate_docx(pdf_info: dict) -> None:
         'desde': pdf_info['desde'],
         'poliza': pdf_info['poliza'],
         'cantfin': pdf_info['cantfin'],
-        'nrocotiza': pdf_info['nrocotiza']
+        'nrocotiza': pdf_info['nrocotiza'],
+        'cargo': pdf_info['cargo'],
+        'totalpag': pdf_info['totalpag'],
+        'mtocuota': pdf_info['mtocuota'],
+        'mtoventa': pdf_info['mtoventa'],
     }
 
     template.render(datos)
@@ -254,17 +300,34 @@ def process_pdf_file(pdf_file_path: Path) -> None:
         
         if os.path.exists(file_path):
             os.remove(os.path.join(carpeta_procesados, file_name))
+
         shutil.move(os.path.join(carpeta_pdf, pdf_file_path), carpeta_procesados)
+
+def is_file_locked(file_path):
+    try:
+        #os.open(file_path, os.O_EXCL | os.O_RDWR)
+        os.open(file_path, os.O_RDONLY)
+    except OSError:
+        return True
+    return False        
         
 
 def main() -> None:
     for file in os.listdir(carpeta_pdf):
         if file.endswith('.pdf'):
             pdf_file_path = Path(os.path.join(carpeta_pdf, file))
-            tipo_doc = extract_tipo_documento(pdf_file_path)
-            if tipo_doc:
-               # Procesar Archivo PDF
-               process_pdf_file(pdf_file_path)
+            #if not is_file_locked(pdf_file_path):
+            mime_type, _ = mimetypes.guess_type(str(pdf_file_path))
+            if mime_type == 'application/pdf':
+               try:
+                  tipo_doc = extract_tipo_documento(pdf_file_path)
+                  if tipo_doc:
+                     # Procesar Archivo PDF
+                     process_pdf_file(pdf_file_path)
+               except Exception as e:
+                         print(f"Error al leer el archivo PDF {pdf_file_path} {e}")
+            else:
+                print(f"El archivo {pdf_file_path} no es un PDF válido")          
 
 if __name__ == "__main__":
     main()
