@@ -54,13 +54,15 @@ class CondicionesAxeso:
         for i, rango in enumerate(rangos):
             if monto <= rango:
                 factor = factores[i]
+                calculo = monto * factor
                 break
             elif monto > limite_superior:
                 factor = factores[-1]  # toma el factor del límite superior
+                calculo = monto * factor
                 break
         else:
-            factor = None  # Si no se encuentra un rango que coincida, asigna None
-        return factor    
+            calculo = 0  # Si no se encuentra un rango que coincida, asigna None
+        return calculo  
         
 
     def incrementa_nrocotiza(self):
@@ -125,7 +127,25 @@ def extract_direccion_info(pdf_file_path: Path) -> str:
                 # Remove double spaces
                 insured_data = re.sub(' +', ' ', insured_data)
                 return insured_data.strip()
-    return None
+    return None 
+
+def extract_direccion_info_2(pdf_file_path: Path) -> str:
+    #Extrae información de la Direccion de un archivo PDF
+    pdf = PyPDF2.PdfReader(str(pdf_file_path))
+    for page in pdf.pages:
+        text = page.extract_text()
+        insured_index = text.find('AGENCY AND MAILING A DDRESS  2')
+        if insured_index != -1:
+            insured_data = text[insured_index + 31:]
+            singular_insurance_index = insured_data.find('SINGULAR INSURANCE A GENCY,')
+            if singular_insurance_index != -1:
+                insured_data = insured_data[:singular_insurance_index]
+                # Remove newline characters
+                insured_data = insured_data.replace('\n', ' ')
+                # Remove double spaces
+                insured_data = re.sub(' +', ' ', insured_data)
+                return insured_data.strip()
+    return None  
 
 def extract_poliza_info(pdf_file_path: Path) -> str:
     #Extrae información de la Direccion de un archivo PDF
@@ -214,12 +234,17 @@ def extract_pdf_info(pdf_file_path: Path) -> dict:
     # Incrementar nrocotiza
     condiciones_axeso.incrementa_nrocotiza()
     # Buscar Cargo del Financiamiento
-    cargo = prima_info * condiciones_axeso.cargo_financiamiento(prima_info)
+    deposito = prima_info * condiciones_axeso.monto_inicial
+    cantfin = prima_info - deposito
+    cargo = condiciones_axeso.cargo_financiamiento(cantfin)
     # Guardar datos
     condiciones_axeso.guarda_datos()
     #Extrae información de un archivo PDF
     client_info = extract_client_info(pdf_file_path)
     direccion_info = extract_direccion_info(pdf_file_path)
+    if direccion_info is None:
+       direccion_info = extract_direccion_info_2(pdf_file_path)
+
     poliza_info = extract_poliza_info(pdf_file_path)
     prima_info = extract_prima_info(pdf_file_path)
     desde_info = extract_desde_info(pdf_file_path)
@@ -227,8 +252,6 @@ def extract_pdf_info(pdf_file_path: Path) -> dict:
     fecha_pago1_date = datetime.strptime(fechapago1, '%m/%d/%Y')
     fechapago2_date = fecha_pago1_date + relativedelta(months=condiciones_axeso.numero_cuotas)
     fechapago2 = fechapago2_date.strftime('%m/%d/%Y')
-    deposito = prima_info * condiciones_axeso.monto_inicial
-    cantfin = prima_info - deposito
     totalpag = cantfin + cargo
     mtocuota = totalpag / condiciones_axeso.numero_cuotas
     mtoventa = prima_info + cargo
