@@ -33,7 +33,7 @@ class CondicionesAxeso:
         self.meses_a_sumar = self.sheet.cell(row=2, column=3).value
         self.nrocotiza = self.sheet.cell(row=2, column=4).value + 1
 
-    def cargo_financiamiento(self,monto):
+    def pago_mensual(self,monto):
         # Define el límite superior
         limite_superior = 9999999
 
@@ -62,8 +62,7 @@ class CondicionesAxeso:
                 break
         else:
             calculo = 0  # Si no se encuentra un rango que coincida, asigna None
-        return calculo  
-        
+        return calculo 
 
     def incrementa_nrocotiza(self):
         self.sheet.cell(row=2, column=4).value += 1
@@ -235,8 +234,11 @@ def extract_pdf_info(pdf_file_path: Path) -> dict:
     condiciones_axeso.incrementa_nrocotiza()
     # Buscar Cargo del Financiamiento
     deposito = prima_info * condiciones_axeso.monto_inicial
+    ncuotas = condiciones_axeso.numero_cuotas
     cantfin = prima_info - deposito
-    cargo = condiciones_axeso.cargo_financiamiento(cantfin)
+    mtocuota = round(condiciones_axeso.pago_mensual(cantfin),2)
+    #cargo = condiciones_axeso.cargo_financiamiento(cantfin)
+    cargo = mtocuota * ncuotas - cantfin
     # Guardar datos
     condiciones_axeso.guarda_datos()
     #Extrae información de un archivo PDF
@@ -250,10 +252,9 @@ def extract_pdf_info(pdf_file_path: Path) -> dict:
     desde_info = extract_desde_info(pdf_file_path)
     fechapago1 = date.today().strftime("%m/%d/%Y")
     fecha_pago1_date = datetime.strptime(fechapago1, '%m/%d/%Y')
-    fechapago2_date = fecha_pago1_date + relativedelta(months=condiciones_axeso.numero_cuotas)
+    fechapago2_date = fecha_pago1_date + relativedelta(months=ncuotas)
     fechapago2 = fechapago2_date.strftime('%m/%d/%Y')
     totalpag = cantfin + cargo
-    mtocuota = totalpag / condiciones_axeso.numero_cuotas
     mtoventa = prima_info + cargo
     #print('client_info: ',client_info)
     #print('direccion_info: ', direccion_info)
@@ -269,7 +270,7 @@ def extract_pdf_info(pdf_file_path: Path) -> dict:
                 'fechapago1': fechapago1,
                 'fechapago2': fechapago2,
                 'deposito': "{0:,.2f}".format(deposito),
-                'cuotas': condiciones_axeso.numero_cuotas,
+                'cuotas': ncuotas,
                 'cantfin': "{0:,.2f}".format(cantfin),
                 'nrocotiza': condiciones_axeso.nrocotiza,
                 'cargo': "{0:,.2f}".format(cargo),
@@ -278,7 +279,7 @@ def extract_pdf_info(pdf_file_path: Path) -> dict:
                 'mtoventa': "{0:,.2f}".format(mtoventa)
                  }
  
-def generate_docx(pdf_info: dict) -> None:
+def generate_docx(pdf_info: dict, nbredocpdf: str) -> None:
     #Genera un archivo DOCX a partir de la información extraída del PDF
     template = DocxTemplate(plantilla_axeso)
     datos = {
@@ -301,9 +302,16 @@ def generate_docx(pdf_info: dict) -> None:
 
     template.render(datos)
     nombre_archivo = 'Axeso '+str(datos['nrocotiza'])+'.docx'
-    nombre_archivo_pdf = 'Axeso '+str(datos['nrocotiza'])+'.pdf'
+    #nombre_archivo_pdf = 'Axeso '+str(datos['nrocotiza'])+'.pdf'
+    nombre_archivo_pdf = 'Axeso '+nbredocpdf
+
     ruta_completa = os.path.join(carpeta_procesados, nombre_archivo)
     ruta_completa_pdf = os.path.join(carpeta_procesados, nombre_archivo_pdf)
+
+    # Si el documento existe en procesado. Se debe eliminar antes.
+    if os.path.exists(ruta_completa_pdf):
+       os.remove(os.path.join(carpeta_procesados, nombre_archivo_pdf))
+    
     template.save(ruta_completa)
     
     # Convertir el documento a PDF
@@ -317,10 +325,10 @@ def process_pdf_file(pdf_file_path: Path) -> None:
     # Procesa un archivo PDF y genera un archivo DOCX
     pdf_info = extract_pdf_info(pdf_file_path)
     if pdf_info:
-        generate_docx(pdf_info)
         file_name = os.path.basename(pdf_file_path)
         file_path = os.path.join(carpeta_procesados, file_name)
-        
+        generate_docx(pdf_info,file_name)
+        #print('name,path:',file_name,file_path)
         if os.path.exists(file_path):
             os.remove(os.path.join(carpeta_procesados, file_name))
 
@@ -342,12 +350,15 @@ def main() -> None:
             #if not is_file_locked(pdf_file_path):
             mime_type, _ = mimetypes.guess_type(str(pdf_file_path))
             if mime_type == 'application/pdf':
-               try:
-                  tipo_doc = extract_tipo_documento(pdf_file_path)
-                  if tipo_doc:
-                     # Procesar Archivo PDF
-                     process_pdf_file(pdf_file_path)
-               except Exception as e:
+               fecha_creacion = datetime.fromtimestamp(os.path.getctime(pdf_file_path)).date()
+               #print('fecha creacion: ',fecha_creacion,date.today(),pdf_file_path)
+               if fecha_creacion == date.today():
+                  try:
+                        tipo_doc = extract_tipo_documento(pdf_file_path)
+                        if tipo_doc:
+                            # Procesar Archivo PDF
+                            process_pdf_file(pdf_file_path)
+                  except Exception as e:
                          print(f"Error al leer el archivo PDF {pdf_file_path} {e}")
             else:
                 print(f"El archivo {pdf_file_path} no es un PDF válido")          
